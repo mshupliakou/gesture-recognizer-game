@@ -1,4 +1,5 @@
 recordings/
+benchmarks/
 gesture_recognizer.task
 __pycache__/
 *.pyc

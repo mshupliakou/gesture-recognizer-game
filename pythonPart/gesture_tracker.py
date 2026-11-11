@@ -16,6 +16,7 @@ Usage:
     python gesture_tracker.py --frames        # record every frame too (for training your own model)
     python gesture_tracker.py --udp           # + send to 127.0.0.1:5050
     python gesture_tracker.py --camera 1      # different camera
+    python gesture_tracker.py --headless      # pure UDP sender (no GUI, no recording, Auto-UDP)
 
 Keys:  q / Esc — quit,  r — toggle recording,  d — toggle dark background
 """
@@ -130,7 +131,11 @@ def build_packet(hands, ts):
                 "score": round(h["score"], 3),
                 "palm": {k: round(float(v), 4) for k, v in zip("xyz", h["palm"])},
                 "pinch": round(h["pinch"], 3),
-                "landmarks": [[round(float(c), 4) for c in p] for p in h["pts"]],
+                # Zmieniono na obiekty {x, y, z}, aby JsonUtility w C# mogło to sparsować
+                "landmarks": [
+                    {"x": round(float(p[0]), 4), "y": round(float(p[1]), 4), "z": round(float(p[2]), 4)}
+                    for p in h["pts"]
+                ],
             }
             for h in hands
         ],
@@ -138,7 +143,7 @@ def build_packet(hands, ts):
 
 
 # --------------------------------------------------------------------------- #
-#  Gesture Stabilizer (removes "Fist ↔ None ↔ Fist" jitter)
+#  Gesture Stabilizer
 # --------------------------------------------------------------------------- #
 class GestureStabilizer:
     def __init__(self, frames=STABLE_FRAMES):
@@ -168,22 +173,28 @@ class GestureStabilizer:
 
 
 # --------------------------------------------------------------------------- #
-#  Recording to file
+#  Recording to file (Null-safe for headless mode)
 # --------------------------------------------------------------------------- #
 class Recorder:
-    def __init__(self, write_frames=False):
-        RECORD_DIR.mkdir(exist_ok=True)
-        self.path = RECORD_DIR / time.strftime("gestures_%Y%m%d_%H%M%S.jsonl")
-        self.file = open(self.path, "a", encoding="utf-8")
+    def __init__(self, enabled=True, write_frames=False):
+        self.enabled = enabled
         self.write_frames = write_frames
-        self.active = True
+        self.active = enabled
         self.count = 0
+        self.path = None
+        self.file = None
+
+        if self.enabled:
+            RECORD_DIR.mkdir(exist_ok=True)
+            self.path = RECORD_DIR / time.strftime("gestures_%Y%m%d_%H%M%S.jsonl")
+            self.file = open(self.path, "a", encoding="utf-8")
 
     def toggle(self):
-        self.active = not self.active
+        if self.enabled:
+            self.active = not self.active
 
     def _write(self, obj):
-        if self.active:
+        if self.enabled and self.active and self.file:
             self.file.write(json.dumps(obj, ensure_ascii=False) + "\n")
             self.count += 1
 
@@ -196,17 +207,17 @@ class Recorder:
             self._write({"type": "frame", **packet})
 
     def close(self):
-        self.file.flush()
-        self.file.close()
+        if self.file:
+            self.file.flush()
+            self.file.close()
 
 
 # --------------------------------------------------------------------------- #
-#  Rendering
+#  Rendering (Used only when not in --headless mode)
 # --------------------------------------------------------------------------- #
 def draw_skeleton(frame, hands_px, trails):
     """Draw skeleton on a separate layer, blur it -> get a neon glow."""
     layer = np.zeros_like(frame)
-
     for h in hands_px:
         pts = h["px"]
         for a, b in CONNECTIONS:
@@ -287,9 +298,13 @@ def main():
     ap.add_argument("--height", type=int, default=720)
     ap.add_argument("--frames", action="store_true", help="write every frame with 21 landmarks to file")
     ap.add_argument("--udp", action="store_true", help="send JSON via UDP")
+    ap.add_argument("--headless", action="store_true", help="disable GUI and disk recording, force UDP")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=5050)
     args = ap.parse_args()
+
+    if args.headless:
+        args.udp = True
 
     cap = cv2.VideoCapture(args.camera)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
@@ -299,19 +314,22 @@ def main():
 
     recognizer = create_recognizer()
     stabilizer = GestureStabilizer()
-    recorder = Recorder(write_frames=args.frames)
+    recorder = Recorder(enabled=not args.headless, write_frames=args.frames)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) if args.udp else None
 
-    trails = {}                       # hand -> deque of points
-    events_log = deque(maxlen=5)      # recent events for HUD
+    trails = {}
+    events_log = deque(maxlen=5)
     dim = True
     t_start = time.monotonic()
     t_prev = t_start
     fps = 0.0
 
-    print(f"Recording to: {recorder.path}")
+    if not args.headless and recorder.path:
+        print(f"Recording to: {recorder.path}")
     if args.udp:
-        print(f"UDP -> {args.host}:{args.port}")
+        print(f"Sending UDP -> {args.host}:{args.port} (Headless: {args.headless})")
+    if args.headless:
+        print("Running in HEADLESS mode. Press Ctrl+C in terminal to stop.")
 
     try:
         while True:
@@ -345,56 +363,66 @@ def main():
                 seen.add(label)
 
                 stable, prev = stabilizer.update(label, raw)
-                if prev is not None:
+                if prev is not None and not args.headless:
                     recorder.event(ts, label, stable, prev)
                     events_log.append(f"{ts:7.2f}s  {label}: {prev} -> {stable}")
 
                 pts, palm, pinch = hand_metrics(lm)
-                px = [(int(p[0] * W), int(p[1] * H)) for p in pts]
+                px = [(int(p[0] * W), int(p[1] * H)) for p in pts] if not args.headless else []
                 hands.append({"hand": label, "gesture": stable, "raw_gesture": raw,
                               "score": float(score), "pts": pts, "palm": palm,
                               "pinch": pinch, "px": px})
 
-                tr = trails.setdefault(label, deque(maxlen=TRAIL_LENGTH))
-                tr.append(px[8])
+                if not args.headless:
+                    tr = trails.setdefault(label, deque(maxlen=TRAIL_LENGTH))
+                    tr.append(px[8])
 
             # hands that disappeared from frame
             for label in list(stabilizer.state):
                 if label not in seen:
                     prev = stabilizer.drop(label)
-                    if prev:
+                    if prev and not args.headless:
                         recorder.event(ts, label, "None", prev)
                         events_log.append(f"{ts:7.2f}s  {label}: {prev} -> None")
-            for label in list(trails):
-                if label not in seen:
-                    del trails[label]
+            
+            if not args.headless:
+                for label in list(trails):
+                    if label not in seen:
+                        del trails[label]
 
             # packet for file/game
             packet = build_packet(hands, ts)
-            recorder.frame(packet)
-            if sock and hands:
+            if not args.headless:
+                recorder.frame(packet)
+            
+            # Wysyłamy pakiet zawsze (nawet gdy lista hands jest pusta), aby Unity od razu wiedziało o braku dłoni
+            if sock:
                 sock.sendto(json.dumps(packet).encode("utf-8"), (args.host, args.port))
 
-            # visualization
-            if dim:
-                frame = cv2.convertScaleAbs(frame, alpha=0.55, beta=0)
-            frame = draw_skeleton(frame, hands, trails)
-            draw_hud(frame, hands, fps, recorder, events_log)
+            if not args.headless:
+                if dim:
+                    frame = cv2.convertScaleAbs(frame, alpha=0.55, beta=0)
+                frame = draw_skeleton(frame, hands, trails)
+                draw_hud(frame, hands, fps, recorder, events_log)
 
-            cv2.imshow("Gesture Tracker", frame)
-            key = cv2.waitKey(1) & 0xFF
-            if key in (ord("q"), 27):
-                break
-            elif key == ord("r"):
-                recorder.toggle()
-            elif key == ord("d"):
-                dim = not dim
+                cv2.imshow("Gesture Tracker", frame)
+                key = cv2.waitKey(1) & 0xFF
+                if key in (ord("q"), 27):
+                    break
+                elif key == ord("r"):
+                    recorder.toggle()
+                elif key == ord("d"):
+                    dim = not dim
+    except KeyboardInterrupt:
+        print("\nStopping tracker...")
     finally:
         cap.release()
-        cv2.destroyAllWindows()
+        if not args.headless:
+            cv2.destroyAllWindows()
         recognizer.close()
         recorder.close()
-        print(f"Saved {recorder.count} records: {recorder.path}")
+        if not args.headless:
+            print(f"Saved {recorder.count} records: {recorder.path}")
 
 
 if __name__ == "__main__":
