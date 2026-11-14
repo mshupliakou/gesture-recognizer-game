@@ -32,8 +32,10 @@ import urllib.request
 from pathlib import Path
 
 import cv2
+import joblib
 import mediapipe as mp
 import numpy as np
+from helper_functions import normalize, to_media_pipe
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision
 
@@ -51,6 +53,7 @@ ALLOWED_GESTURES = ["Pointing_Up", "Thumb_Down", "Thumb_Up", "Victory"]
 TRIAL_DURATION = 5.0       # Czas trwania pojedynczego okna testowego [s]
 SCORE_THRESHOLD = 0.60     # Próg pewności (60%)
 STABLE_FRAMES = 4          # Wygładzanie dla sterowania w Unity
+CUSTOM_MODEL_PATH = Path(__file__).with_name("models") / "custom_gesture_model.joblib"
 
 
 def ensure_model() -> Path:
@@ -76,19 +79,45 @@ def create_mp_recognizer():
 # =========================================================================== #
 #  WŁASNY KLASYFIKATOR
 # =========================================================================== #
-class CustomClassifierPlaceholder:
-    def __init__(self):
-        # TODO: Tutaj wczytaj swój wytrenowany model z pliku (np. joblib, torch)
-        self.fallback_mp = create_mp_recognizer()
+class CustomClassifier:
+    def __init__(self, model_path: Path):
+        if not model_path.exists():
+            raise FileNotFoundError(f"Brak modelu: {model_path}")
+        payload = joblib.load(model_path)
+        self.model = payload.get("model")
+        self.classes = payload.get("classes", [])
+        self.feature_mode = payload.get("feature", "normalized")
+        if self.model is None:
+            raise ValueError(f"Plik modelu nie zawiera wytrenowanego klasyfikatora: {model_path}")
+
+    def _build_features(self, landmarks_np: np.ndarray) -> np.ndarray:
+        if self.feature_mode == "raw":
+            feats = np.asarray(landmarks_np, dtype=np.float32).reshape(-1)
+        else:
+            feats = normalize(np.asarray(landmarks_np, dtype=np.float32))
+        return feats.reshape(1, -1)
 
     def predict(self, mp_image, timestamp_ms: int, landmarks_np: np.ndarray | None) -> tuple[str, float]:
-        res = self.fallback_mp.recognize_for_video(mp_image, timestamp_ms)
-        if res.gestures and res.gestures[0]:
-            return res.gestures[0][0].category_name, float(res.gestures[0][0].score)
-        return "None", 0.0
+        if landmarks_np is None:
+            return "None", 0.0
+        x = self._build_features(landmarks_np)
+        pred = self.model.predict(x)
+        raw_label = str(pred[0]) if len(pred) else "none"
+
+        score = 0.0
+        if hasattr(self.model, "predict_proba"):
+            try:
+                probs = self.model.predict_proba(x)[0]
+                score = float(np.max(probs))
+            except Exception:
+                score = 1.0
+        else:
+            score = 1.0
+
+        return to_media_pipe(raw_label), score
 
     def close(self):
-        self.fallback_mp.close()
+        return None
 
 
 # --------------------------------------------------------------------------- #
@@ -235,6 +264,7 @@ def main():
     ap.add_argument("--gui", action="store_true", help="Pokaż okno podglądu")
     ap.add_argument("--task", action="store_true", help="Tryb gry: użyj modelu MediaPipe (bez benchmarku)")
     ap.add_argument("--trained", action="store_true", help="Tryb gry: użyj własnego modelu (bez benchmarku)")
+    ap.add_argument("--custom-model", default=str(CUSTOM_MODEL_PATH), help="Ścieżka do pliku .joblib z wytrenowanym modelem")
     args = ap.parse_args()
 
     # Ochrona przed błędem w wyborze flag
@@ -254,7 +284,7 @@ def main():
     # Inicjalizacja własnego klasyfikatora tylko, jeśli jest potrzebny
     custom_classifier = None
     if not game_mode or args.trained:
-        custom_classifier = CustomClassifierPlaceholder()
+        custom_classifier = CustomClassifier(Path(args.custom_model))
         
     stabilizer = GestureStabilizer()
     trials = TrialManager() if not game_mode else None

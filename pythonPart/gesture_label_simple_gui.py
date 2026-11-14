@@ -27,6 +27,7 @@ import joblib
 import matplotlib.pyplot as plt
 import mediapipe as mp
 import numpy as np
+from helper_functions import normalize
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision
 from sklearn.ensemble import RandomForestClassifier
@@ -63,21 +64,6 @@ def normalize_label_name(raw_label: str) -> str:
     value = re.sub(r"[^a-z0-9]+", "_", value)
     value = re.sub(r"_+", "_", value).strip("_")
     return value
-
-
-def normalize_landmarks(landmarks_21x3: np.ndarray) -> np.ndarray:  # przeskalowywujemy dłoń, żeby duża i mała działała tak samo
-    pts = np.asarray(landmarks_21x3, dtype=np.float32)
-    if pts.shape != (21, 3):
-        raise ValueError(f"Expected (21,3), got {pts.shape}")
-
-    wrist = pts[0].copy()
-    centered = pts - wrist
-
-    scale = np.linalg.norm(pts[9, :2] - pts[0, :2])
-    if scale < 1e-6:
-        scale = 1e-6
-
-    return (centered / scale).reshape(-1)
 
 
 def draw_overlay(rgb: np.ndarray, landmarks: np.ndarray) -> np.ndarray:  # rysowanie ręki
@@ -169,7 +155,7 @@ def extract_landmarks_from_image(image_path: str, label: str = "", allow_augment
 
         lm = result.hand_landmarks[0]
         landmarks = np.array([[p.x, p.y, p.z] for p in lm], dtype=np.float32)
-        feature = normalize_landmarks(landmarks)
+        feature = normalize(landmarks)
         preview = draw_overlay(rgb, landmarks)
         found.append({
             "label": normalize_label_name(label),
@@ -500,6 +486,160 @@ def compare_best_model_with_augmentation(samples: List[Dict], report_dir: Path):
     )
 
 
+def compare_best_model_vs_mediapipe(
+    samples: List[Dict],
+    selected_model,
+    selected_feature_mode: str,
+    report_dir: Path,
+):
+    records = _collect_records_from_samples(samples)
+    if len(records) < 4:
+        return "Porównanie Best vs MediaPipe pominięte: za mało danych źródłowych."
+
+    labels = [label for _, label in records]
+    classes = sorted(set(labels))
+    if len(classes) < 2:
+        return "Porównanie Best vs MediaPipe pominięte: potrzeba min. 2 klas."
+
+    counts = {label: labels.count(label) for label in classes}
+    too_small = [label for label, count in counts.items() if count < 2]
+    if too_small:
+        return "Porównanie Best vs MediaPipe pominięte: za mało próbek klas: " + ", ".join(too_small)
+
+    indices = np.arange(len(records))
+    _, test_idx = train_test_split(
+        indices,
+        test_size=TEST_SIZE,
+        random_state=42,
+        stratify=labels,
+    )
+    test_records = [records[int(i)] for i in test_idx]
+
+    y_true = []
+    y_pred_custom = []
+    y_pred_mp = []
+    mp_total_time = 0.0
+    custom_total_time = 0.0
+    used_samples = 0
+
+    for image_path, true_label in test_records:
+        bgr = cv2.imread(image_path)
+        if bgr is None:
+            continue
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+
+        mp_start = time.perf_counter()
+        result = RECOGNIZER.recognize(mp_img)
+        mp_total_time += time.perf_counter() - mp_start
+
+        normalized_true = normalize_label_name(true_label)
+        pred_mp = "none"
+        pred_custom = "none"
+
+        if result.gestures and result.gestures[0]:
+            pred_mp = normalize_label_name(result.gestures[0][0].category_name)
+
+        if result.hand_landmarks:
+            landmarks = np.array([[p.x, p.y, p.z] for p in result.hand_landmarks[0]], dtype=np.float32)
+            if selected_feature_mode == "raw":
+                feat = landmarks.reshape(1, -1)
+            else:
+                feat = normalize(landmarks).reshape(1, -1)
+
+            custom_start = time.perf_counter()
+            pred_custom = normalize_label_name(str(selected_model.predict(feat)[0]))
+            custom_total_time += time.perf_counter() - custom_start
+
+        y_true.append(normalized_true)
+        y_pred_mp.append(pred_mp)
+        y_pred_custom.append(pred_custom)
+        used_samples += 1
+
+    if used_samples == 0:
+        return "Porównanie Best vs MediaPipe pominięte: brak poprawnie wczytanych próbek testowych."
+
+    y_true_arr = np.asarray(y_true)
+    y_pred_custom_arr = np.asarray(y_pred_custom)
+    y_pred_mp_arr = np.asarray(y_pred_mp)
+
+    custom_acc = float(np.mean(y_pred_custom_arr == y_true_arr))
+    mp_acc = float(np.mean(y_pred_mp_arr == y_true_arr))
+
+    all_cm_classes = sorted(set(y_true) | set(y_pred_custom) | set(y_pred_mp))
+    if not all_cm_classes:
+        all_cm_classes = classes
+
+    rows = [
+        {
+            "model": "best_custom",
+            "accuracy": custom_acc,
+            "avg_predict_time_ms": (custom_total_time / used_samples) * 1000.0,
+            "samples": used_samples,
+        },
+        {
+            "model": "mediapipe_google",
+            "accuracy": mp_acc,
+            "avg_predict_time_ms": (mp_total_time / used_samples) * 1000.0,
+            "samples": used_samples,
+        },
+    ]
+
+    csv_path = report_dir / "best_vs_mediapipe.csv"
+    with csv_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["model", "accuracy", "avg_predict_time_ms", "samples"])
+        writer.writeheader()
+        writer.writerows(rows)
+
+    custom_report = classification_report(
+        y_true_arr,
+        y_pred_custom_arr,
+        labels=all_cm_classes,
+        target_names=all_cm_classes,
+        digits=3,
+        zero_division=0,
+    )
+    mp_report = classification_report(
+        y_true_arr,
+        y_pred_mp_arr,
+        labels=all_cm_classes,
+        target_names=all_cm_classes,
+        digits=3,
+        zero_division=0,
+    )
+    with (report_dir / "best_custom_report.txt").open("w", encoding="utf-8") as handle:
+        handle.write(custom_report)
+    with (report_dir / "mediapipe_google_report.txt").open("w", encoding="utf-8") as handle:
+        handle.write(mp_report)
+
+    custom_cm = make_confusion_plot(y_true_arr, y_pred_custom_arr, all_cm_classes, "Best custom model")
+    custom_cm.savefig(report_dir / "best_custom_cm.png", dpi=200)
+    plt.close(custom_cm)
+
+    mp_cm = make_confusion_plot(y_true_arr, y_pred_mp_arr, all_cm_classes, "Google MediaPipe")
+    mp_cm.savefig(report_dir / "mediapipe_google_cm.png", dpi=200)
+    plt.close(mp_cm)
+
+    fig, ax = plt.subplots(figsize=(6.8, 4.2))
+    labels_plot = ["Best custom", "Google MediaPipe"]
+    values_plot = [custom_acc, mp_acc]
+    bars = ax.bar(labels_plot, values_plot, color=["#2E86DE", "#F39C12"])
+    ax.set_ylim(0, 1.05)
+    ax.set_ylabel("Accuracy")
+    ax.set_title("Best custom vs Google MediaPipe")
+    for bar, value in zip(bars, values_plot):
+        ax.text(bar.get_x() + bar.get_width() / 2, value + 0.02, f"{value:.3f}", ha="center")
+    fig.tight_layout()
+    fig.savefig(report_dir / "best_vs_mediapipe_accuracy.png", dpi=200)
+    plt.close(fig)
+
+    return (
+        "Best custom vs Google MediaPipe:\n"
+        f"- Best custom: accuracy={custom_acc:.3f}, avg_pred_ms={(custom_total_time / used_samples) * 1000.0:.3f}\n"
+        f"- MediaPipe: accuracy={mp_acc:.3f}, avg_pred_ms={(mp_total_time / used_samples) * 1000.0:.3f}"
+    )
+
+
 def evaluate_model_configs(X: np.ndarray, y: np.ndarray, classes: List[str], feature_name: str, report_dir: Path):
     indices = np.arange(len(y))
     train_idx, test_idx = train_test_split(
@@ -600,6 +740,7 @@ def evaluate_model_configs(X: np.ndarray, y: np.ndarray, classes: List[str], fea
     best_model_name = ""
     best_acc = -1.0
     best_y_pred = None
+    best_model = None
 
     for model_name, model in model_specs:
         start = time.perf_counter()
@@ -615,6 +756,7 @@ def evaluate_model_configs(X: np.ndarray, y: np.ndarray, classes: List[str], fea
             best_acc = acc
             best_model_name = model_name
             best_y_pred = y_pred
+            best_model = model
 
         rows.append({
             "feature_set": feature_name,
@@ -644,7 +786,7 @@ def evaluate_model_configs(X: np.ndarray, y: np.ndarray, classes: List[str], fea
         best_cm.savefig(report_dir / f"{feature_name}_best_cm.png", dpi=200)
         plt.close(best_cm)
 
-    return rows, best_model_name, best_y_pred, y_test
+    return rows, best_model_name, best_model, best_y_pred, y_test
 
 
 def train_and_save(samples: List[Dict], out_path: str):
@@ -679,8 +821,8 @@ def train_and_save(samples: List[Dict], out_path: str):
     report_dir = Path("results") / f"gesture_benchmark_{time.strftime('%Y%m%d_%H%M%S')}"
     report_dir.mkdir(parents=True, exist_ok=True)
 
-    norm_rows, _, y_pred_norm, y_test_norm = evaluate_model_configs(X_norm, y, classes, "normalized", report_dir)
-    raw_rows, _, y_pred_raw, y_test_raw = evaluate_model_configs(X_raw, y, classes, "raw", report_dir)
+    norm_rows, norm_best_name, norm_best_model, y_pred_norm, y_test_norm = evaluate_model_configs(X_norm, y, classes, "normalized", report_dir)
+    raw_rows, raw_best_name, raw_best_model, y_pred_raw, y_test_raw = evaluate_model_configs(X_raw, y, classes, "raw", report_dir)
 
     all_rows = norm_rows + raw_rows
     save_csv_report(all_rows, report_dir / "combined_summary.csv")
@@ -694,10 +836,19 @@ def train_and_save(samples: List[Dict], out_path: str):
     best_norm = max(norm_rows, key=lambda r: r["accuracy"])
     best_raw = max(raw_rows, key=lambda r: r["accuracy"])
 
+    selected_feature_mode = "normalized"
+    selected_model_name = norm_best_name
+    selected_model = norm_best_model
+    if best_raw["accuracy"] > best_norm["accuracy"]:
+        selected_feature_mode = "raw"
+        selected_model_name = raw_best_name
+        selected_model = raw_best_model
+
     payload = {
-        "model": None,
+        "model": selected_model,
         "classes": classes,
-        "feature": "normalized_21x3_flatten",
+        "feature": selected_feature_mode,
+        "selected_model_name": selected_model_name,
         "source": "manual_images_labels_gradio",
         "num_samples": len(samples),
         "report_dir": str(report_dir),
@@ -714,11 +865,15 @@ def train_and_save(samples: List[Dict], out_path: str):
         f"Raport: {report_dir}\n\n"
         f"{make_model_summary_text(all_rows)}\n\n"
         f"Najlepszy model (z normalize_landmarks): {best_norm['model_name']} | accuracy={best_norm['accuracy']:.3f}\n"
-        f"Najlepszy model (bez normalize_landmarks): {best_raw['model_name']} | accuracy={best_raw['accuracy']:.3f}"
+        f"Najlepszy model (bez normalize_landmarks): {best_raw['model_name']} | accuracy={best_raw['accuracy']:.3f}\n"
+        f"Wyeksportowany model: {selected_model_name} | feature={selected_feature_mode}"
     )
 
     aug_summary = compare_best_model_with_augmentation(samples, report_dir)
     summary_text = summary_text + "\n\n" + aug_summary
+
+    mp_summary = compare_best_model_vs_mediapipe(samples, selected_model, selected_feature_mode, report_dir)
+    summary_text = summary_text + "\n\n" + mp_summary
 
     cm_norm_plot = make_confusion_plot(y_test_norm, y_pred_norm, classes, "Macierz pomyłek (z normalize_landmarks)") if y_pred_norm is not None else make_confusion_plot(y, y, classes, "Macierz pomyłek (z normalize_landmarks)")
     cm_raw_plot = make_confusion_plot(y_test_raw, y_pred_raw, classes, "Macierz pomyłek (bez normalize_landmarks)") if y_pred_raw is not None else make_confusion_plot(y, y, classes, "Macierz pomyłek (bez normalize_landmarks)")

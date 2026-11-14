@@ -20,6 +20,7 @@ import cv2
 import joblib
 import mediapipe as mp
 import numpy as np
+from helper_functions import normalize
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision
 
@@ -42,21 +43,6 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--height", type=int, default=720)
     ap.add_argument("--min-score", type=float, default=0.0, help="Hide predictions below this confidence")
     return ap.parse_args()
-
-
-def normalize_landmarks(landmarks_21x3: np.ndarray) -> np.ndarray:  #przeskalowywujemy dłon zeby duza i mala dzialala tak samo!
-    pts = np.asarray(landmarks_21x3, dtype=np.float32)
-    if pts.shape != (21, 3):
-        raise ValueError(f"Expected (21,3), got {pts.shape}")
-
-    wrist = pts[0].copy() #nadgarstek
-    centered = pts - wrist
-
-    scale = np.linalg.norm(pts[9, :2] - pts[0, :2]) #obliczanie skali - odcinek miedzy nadgarskiem a pcozatkiem srodkowego palca
-    if scale < 1e-6:
-        scale = 1e-6
-
-    return (centered / scale).reshape(-1)
 
 
 def create_recognizer():
@@ -91,6 +77,7 @@ def main() -> None:
 
     payload = joblib.load(model_path)
     model = payload["model"] if isinstance(payload, dict) and "model" in payload else payload
+    feature_mode = payload.get("feature", "normalized") if isinstance(payload, dict) else "normalized"
 
     recognizer = create_recognizer()
 
@@ -131,7 +118,10 @@ def main() -> None:
                     handed = result.handedness[i][0].category_name
 
                 landmarks = np.array([[p.x, p.y, p.z] for p in lm], dtype=np.float32)
-                feat = normalize_landmarks(landmarks).reshape(1, -1)
+                if feature_mode == "raw":
+                    feat = landmarks.reshape(1, -1)
+                else:
+                    feat = normalize(landmarks).reshape(1, -1)
 
                 pred = model.predict(feat)[0]
                 conf = 1.0

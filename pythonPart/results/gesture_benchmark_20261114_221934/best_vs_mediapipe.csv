@@ -1,0 +1,3 @@
+model,accuracy,avg_predict_time_ms,samples
+best_custom,1.0,29.295032125048692,32
+mediapipe_google,0.1875,20.06663668754527,32
