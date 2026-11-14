@@ -1,0 +1,10 @@
+              precision    recall  f1-score   support
+
+ pointing_up      0.867     0.929     0.897        14
+  thumb_down      0.909     0.769     0.833        13
+    thumb_up      0.958     1.000     0.979        23
+     victory      0.667     0.667     0.667         3
+
+    accuracy                          0.906        53
+   macro avg      0.850     0.841     0.844        53
+weighted avg      0.906     0.906     0.904        53

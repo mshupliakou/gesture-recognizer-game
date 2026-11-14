@@ -31,7 +31,7 @@ CONNECTIONS = [
     (9, 13), (13, 14), (14, 15), (15, 16),
     (13, 17), (17, 18), (18, 19), (19, 20),
     (0, 17),
-]
+]#jointy dłoni
 
 
 def parse_args() -> argparse.Namespace:
@@ -44,15 +44,15 @@ def parse_args() -> argparse.Namespace:
     return ap.parse_args()
 
 
-def normalize_landmarks(landmarks_21x3: np.ndarray) -> np.ndarray:
+def normalize_landmarks(landmarks_21x3: np.ndarray) -> np.ndarray:  #przeskalowywujemy dłon zeby duza i mala dzialala tak samo!
     pts = np.asarray(landmarks_21x3, dtype=np.float32)
     if pts.shape != (21, 3):
         raise ValueError(f"Expected (21,3), got {pts.shape}")
 
-    wrist = pts[0].copy()
+    wrist = pts[0].copy() #nadgarstek
     centered = pts - wrist
 
-    scale = np.linalg.norm(pts[9, :2] - pts[0, :2])
+    scale = np.linalg.norm(pts[9, :2] - pts[0, :2]) #obliczanie skali - odcinek miedzy nadgarskiem a pcozatkiem srodkowego palca
     if scale < 1e-6:
         scale = 1e-6
 
