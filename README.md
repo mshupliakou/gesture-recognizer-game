@@ -1,111 +1,91 @@
-# Gra sterowana gestami dłoni (kamera + MediaPipe + Unity)
-
-Projekt to zręcznościowa gra z perspektywy pierwszej osoby (w stylu Beat Saber), w której gracz niszczy nadlatujące z tunelu przeszkody, wykonując odpowiednie gesty dłonią przed kamerą. Projekt składa się z dwóch niezależnych aplikacji, które komunikują się ze sobą lokalnie przez UDP:
-
-1. **Moduł Python** (`pythonPart`) – odczytuje obraz z kamerki, wykrywa dłoń i rozpoznaje gesty za pomocą modelu MediaPipe (`GestureRecognizer`) lub autorskiego klasyfikatora, a następnie wysyła wyniki jako pakiet JSON przez UDP.
-2. **Gra w Unity** (`unityGame/unityGame`) – odbiera dane z portu UDP, renderuje w przestrzeni 3D neonowy szkielet dłoni gracza i na podstawie rozpoznanych gestów spawnuje pociski, które niszczą nadlatujące płytki z emotikonami.
-
+[Sprawozdanie](https://docs.google.com/document/d/1-7V3ma5Dan7shwS-XfoPM3hgOG_75nKDQnRvET-zWvo/edit?usp=sharing)
+ 
+# 1. Tytuł i numer projektu
+**Gesture Recognizer Game** (Projekt nr 6)
+ 
+# 2. Zespół oraz termin zajęć
+**Zespół 6** | Termin: **poniedziałek, 08:00**
+ 
+# 3. Skład zespołu
+* Maciej Banaś
+* Konrad Ciężadło
+* Mikhail Shupliakou
+# 4. Podział obowiązków w zespole
+* **Maciej Banaś:** Autorski klasyfikator gestów: zbieranie zdjęć (`auto_capture_gestures.py`), etykietowanie, augmentacja i trening modelu w aplikacji Gradio (`gesture_label_simple_gui.py`), normalizacja punktów dłoni (`helper_functions.py`), benchmarki klasyfikatorów i porównanie z MediaPipe (`results/`), skrypt testowy klasyfikatora (`test_gesture_classifier.py`) oraz podłączenie modelu do `scientific_tracker.py`.
+* **Konrad Ciężadło:** Definicja i realizacja gry w silniku Unity (rozgrywka, spawnery, pociski, model fizyczny wiatru i oporu, interfejs) oraz skrypt trybu naukowego (`scientific_tracker.py`).
+* **Mikhail Shupliakou:** Moduł Python do rozpoznawania gestów MediaPipe i komunikacji UDP z Unity (`gesture_tracker.py`), struktura repozytorium, integracja Python–Unity, dokumentacja (README, sprawozdanie).
+# 5. Cel projektu
+Celem projektu jest przygotowanie gry, w której gracz za pomocą gestów dłoni niszczy przeszkody. Wykorzystano gotowy model rozpoznawania dłoni MediaPipe Task. Gesty są interpretowane na podstawie autorskiego klasyfikatora, a wyniki porównywane z rozwiązaniem regułowym (MediaPipe Gesture Recognizer).
+ 
+# 6. Struktura katalogów
 ```text
-Kamera → Python (OpenCV + MediaPipe) → JSON przez UDP (127.0.0.1:5055) → Unity
+gesture-recognizer-game/
+├── README.md
+├── pythonPart/                          # Moduł Python: rozpoznawanie gestów i klasyfikator
+│   ├── gesture_tracker.py               # Prosty tracker do gry (MediaPipe, tryb --headless)
+│   ├── scientific_tracker.py            # Tracker do gry (--task / --trained) oraz tryb naukowy (A/B, CSV)
+│   ├── helper_functions.py              # Normalizacja punktów dłoni, mapowanie nazw gestów
+│   ├── auto_capture_gestures.py         # Robienie zdjęć gestów z kamery do zbioru danych
+│   ├── gesture_label_simple_gui.py      # Gradio: etykietowanie, augmentacja, trening, benchmark, zapis modelu
+│   ├── test_gesture_classifier.py       # Test autorskiego klasyfikatora na żywo z kamery
+│   ├── dataset_captured/                # Zbiór danych: 156 zdjęć (pointing_up, thumb_up, thumb_down, victory)
+│   ├── models/
+│   │   └── custom_gesture_model.joblib  # Wytrenowany autorski klasyfikator (Random Forest)
+│   └── results/                         # Wyniki benchmarków (CSV, raporty, macierze pomyłek, wykresy)
+│       └── gesture_benchmark_<data>/    # Jedno uruchomienie treningu: porównanie modeli, augmentacji i MediaPipe
+└── unityGame/unityGame/                 # Projekt Unity 6.6 (Assets, Packages, ProjectSettings)
+    └── Assets/
+        ├── Scenes/                      # MainMenu, Level (gra), Stats, SampleScene
+        └── Scripts/                     # HandOperation, BulletSpawner, BulletController, Wind, ObstacleSpawner, ObstacleTile, GameManager, ...
 ```
-
-## Struktura repozytorium
-
-```text
-pythonPart/
-  ├── gesture_tracker.py       # Główny skrypt do zwykłej gry (z obsługą trybu --headless)
-  ├── scientific_tracker.py    # Skrypt do trybu naukowego (testy A/B klasyfikatorów, zapis do CSV)
-  ├── benchmarks/              # Folder na wygenerowane pliki CSV z wynikami pomiarów
-unityGame/unityGame/           # Projekt Unity 6 (Assets, Packages, ProjectSettings)
-```
-
-## Wymagania
-
-- Kamera internetowa
-- Python 3.9 – 3.12
-- Unity 6.6 zainstalowane przez Unity Hub
-- System Windows, macOS lub Linux (projekt testowany na Windows)
-
-## Uruchomienie (Zwykła Gra)
-
-### 1. Moduł Python
-
+ 
+Plik `gesture_recognizer.task` (model MediaPipe) nie jest przechowywany w repozytorium. Skrypty pobierają go automatycznie przy pierwszym uruchomieniu (wymagane połączenie z Internetem).
+ 
+# 7. Wymagane środowisko i biblioteki
+* Kamera internetowa
+* Python 3.9 – 3.12
+* Unity 6.6 (edytor `6000.6.7f1`) zainstalowany przez Unity Hub
+* System Windows, macOS lub Linux (projekt testowany na Windows)
+* Biblioteki Python (pełna lista w `wymagania.txt`):
+  * `mediapipe`, `opencv-python`, `numpy` – wykrywanie dłoni i gestów (moduł gry),
+  * `scikit-learn`, `joblib` – autorski klasyfikator (tryb `--trained`),
+  * `gradio`, `matplotlib` – tylko do zbierania danych i trenowania własnego modelu.
+# 8. Instrukcja uruchomienia
+**1. Moduł Python** (uruchom jako pierwszy):
 ```bash
 cd pythonPart
-pip install mediapipe opencv-python numpy
-python scientific_tracker.py --port 5055
+pip install mediapipe opencv-python numpy scikit-learn joblib
+python scientific_tracker.py --task --port 5055
 ```
-
-Wcześniej był plik `gesture_tracker.py` z flagą `--headless`.  `scientific_tracker.py` jest ładnie opisany w pliku.
-
-### 2. Gra w Unity
-
-1. Otwórz **Unity Hub** → **Add** → **Add project from disk** i wskaż folder `unityGame/unityGame`.
-2. Otwórz projekt w edytorze Unity.
-3. W oknie Project otwórz scenę główną: `Assets/Scenes/MainMenu`.
-4. (Weryfikacja) Otwórz scenę `Level`, zaznacz obiekt `HandManager` i upewnij się, że wartość **Port** w komponencie **Hand Operation** to **5055**.
-5. Wróć do sceny `MainMenu`.
-6. **Najpierw uruchom skrypt Python**, a dopiero potem naciśnij **Play** w Unity i kliknij "Play" w menu.
-
-### 3. Sterowanie i Mechanika
-
-Gra korzysta z mapowania znormalizowanych współrzędnych dłoni na fizyczną płaszczyznę wewnątrz tunelu (przed kamerą w Unity).
-
-| Rozpoznawany Gest | Emotikona | Działanie w grze |
-|---|---|---|
-| `Pointing_Up` | ☝️ | Spawnuje niebieski pocisk |
-| `Thumb_Down` | 👎 | Spawnuje czerwony pocisk |
-| `Thumb_Up` | 👍 | Spawnuje zielony pocisk |
-| `Victory` | ✌️ | Spawnuje żółty pocisk |
-
-**Zasady gry:**
-- Z głębi tunelu nadlatują przeszkody (płytki) z wymalowaną emotikoną.
-- Gracz musi ustawić dłoń na odpowiednim torze i wykonać gest odpowiadający emotikonie na płytce.
-- Wykonanie poprawnego gestu (z pewnością modelu > 60%) spawnuje pocisk, który leci w głąb tunelu. 
-- Aby zniszczyć przeszkodę, typ pocisku (gest) musi zgadzać się z typem przeszkody.
-- Zmiany kierunku i siły wiatru (co 4 sekundy) znoszą pociski, wymuszając korektę pozycji dłoni.
-- Przepuszczenie płytki skutkuje utratą 1 z 3 punktów HP.
-
-## Tryb Naukowy (Scientific Benchmark)
-
-Gra zawiera specjalny tryb do testów A/B dwóch klasyfikatorów uczenia maszynowego w czasie rzeczywistym. W tym trybie wiatr jest wyłączony, a prędkość płytek jest stała.
-
-**Jak uruchomić:**
-1. W terminalu uruchom moduł naukowy:
-   `python scientific_tracker.py --port 5055` (możesz dodać `--gui`, aby widzieć podgląd z kamery).
-2. Skrypt automatycznie co 5 sekund losuje gest i wysyła do Unity komendę stworzenia płytki.
-3. W Unity otwórz i uruchom scenę `ScientificLevel`.
-4. Skrypt Python na bieżąco porównuje czas reakcji i pewność modelu bazowego (MediaPipe) z modelem autorskim. Wyniki każdej 5-sekundowej próby są automatycznie zapisywane do pliku CSV w folderze `benchmarks/`.
-
-## Format danych JSON (UDP)
-
-Format został zoptymalizowany pod kątem parsera wbudowanego w Unity (`JsonUtility`), korzystając z płaskich obiektów zamiast zagnieżdżonych tablic.
-
-```json
-{
-  "t": 12.453,
-  "trial_id": 0,
-  "spawn_command": "",
-  "hands": [
-    {
-      "hand": "Right",
-      "gesture": "Victory",
-      "raw_gesture": "Victory",
-      "score": 0.92,
-      "palm": { "x": 0.52, "y": 0.41, "z": -0.02 },
-      "pinch": 0.83,
-      "landmarks": [
-        {"x": 0.501, "y": 0.602, "z": 0.0},
-        {"x": 0.523, "y": 0.580, "z": -0.015}
-      ]
-    }
-  ]
-}
+* `--task` – gra z gotowym modelem MediaPipe Gesture Recognizer,
+* `--trained` – gra z autorskim klasyfikatorem (`models/custom_gesture_model.joblib`),
+* `--gui` – podgląd z kamery, `--camera 1` – inny indeks kamery.
+Do uruchomienia przykładowego scenariusza **nie jest potrzebne** ponowne trenowanie modelu, ponieważ wytrenowany klasyfikator znajduje się w repozytorium.
+ 
+**2. Gra w Unity:**
+1. W Unity Hub wybierz **Add → Add project from disk** i wskaż folder `unityGame/unityGame`.
+2. Otwórz scenę `Assets/Scenes/MainMenu`.
+3. (Weryfikacja) W scenie `Level` zaznacz obiekt `HandManager` i sprawdź, czy **Port** w komponencie **Hand Operation** wynosi **5055**.
+4. Wróć do `MainMenu`, naciśnij **Play** w Unity i kliknij „Play” w menu gry.
+**Sterowanie:** `Pointing_Up` – niebieski pocisk, `Thumb_Down` – czerwony, `Thumb_Up` – zielony, `Victory` – żółty. Aby zniszczyć płytkę, typ pocisku musi odpowiadać emotikonie na płytce (pewność gestu > 60%). Przepuszczenie płytki odbiera 1 z 3 punktów życia.
+ 
+**3. (Opcjonalnie) Trenowanie własnego klasyfikatora:**
+```bash
+cd pythonPart
+pip install gradio matplotlib scikit-learn joblib
+python auto_capture_gestures.py        # robienie zdjęć gestów z kamery (dodatkowe dane)
+python gesture_label_simple_gui.py     # Gradio: wczytaj zdjęcia -> „Dodaj wiele (auto nazwy)” -> „Trenuj, testuj i zapisz”
 ```
-
-## Rozwiązywanie problemów
-
-- **Szkielet dłoni w Unity się nie pojawia** – sprawdź, czy skrypt Python został uruchomiony na właściwym porcie (`--port 5055`), czy dłoń jest dobrze oświetlona oraz czy port w ustawieniach skryptu `HandOperation.cs` w Unity również wynosi 5055.
-- **`Only one usage of each socket address...`** – port 5055 jest zajęty przez inną aplikację lub poprzednią, niezamkniętą instancję Pythona. Upewnij się, że wyłączyłeś skrypt w terminalu (`Ctrl+C`) przed ponownym jego uruchomieniem.
-- **Puste kwadraty zamiast emotikon na płytkach w Unity** – domyślna czcionka TextMeshPro nie posiada znaków Unicode dla emoji. Upewnij się, że w skryptach Spawnerów w polu `Emoji Font Asset` podpięty jest wygenerowany plik SDF oparty na czcionce systemowej (np. `SEGUIEMJ SDF`).
-- **Kamera w Pythonie się nie otwiera** – zamknij inne programy używające kamery, takie jak MS Teams czy Discord, lub spróbuj uruchomić skrypt z flagą `--camera 1`.
+Wyniki treningu trafiają do `pythonPart/results/gesture_benchmark_<data>/`, a model do `pythonPart/models/custom_gesture_model.joblib`.
+ 
+**Rozwiązywanie problemów:** brak szkieletu dłoni – sprawdź zgodność portu (`--port 5055` i ustawienie w Unity); błąd „Only one usage of each socket address” – port zajęty, zamknij poprzednią instancję Pythona; puste kwadraty zamiast emotikon – podepnij czcionkę emoji (np. `SEGUIEMJ SDF`) w polu `Emoji Font Asset` spawnerów; kamera się nie otwiera – zamknij inne programy używające kamery lub użyj `--camera 1`.
+ 
+# 9. Wykorzystany silnik gry
+Unity 6.6
+ 
+# 10. Zastosowane elementy fizyki
+Pocisk w grze posiada zmienne przyspieszenie w osiach X i Y (prostopadłych do długości tunelu), wyliczane z II zasady dynamiki Newtona jako wypadkowa siły wiatru i oporu powietrza. Użyta została również pół-niejawna metoda Eulera do iteracyjnego aktualizowania wektora prędkości i nowej pozycji pocisku w każdej klatce symulacji.
+ 
+# 11. Odnośnik do repozytorium
+https://github.com/mshupliakou/gesture-recognizer-game (wersja oceniana: commit `d1df805`, gałąź `master`)
+ 
