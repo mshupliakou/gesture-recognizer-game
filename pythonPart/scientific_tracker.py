@@ -63,15 +63,19 @@ def ensure_model() -> Path:
         print("Gotowe.")
     return MODEL_PATH
 
-
+from mediapipe.tasks.python.components.processors import ClassifierOptions
 def create_mp_recognizer():
     options = vision.GestureRecognizerOptions(
-        base_options=mp_python.BaseOptions(model_asset_path=str(ensure_model())),
-        running_mode=vision.RunningMode.VIDEO,
+        base_options=mp_python.BaseOptions(model_asset_path=str(MODEL_PATH)),
+        running_mode=vision.RunningMode.IMAGE,
         num_hands=1,
-        min_hand_detection_confidence=0.5,
-        min_hand_presence_confidence=0.5,
-        min_tracking_confidence=0.5,
+        min_hand_detection_confidence=0.3,
+        min_hand_presence_confidence=0.3,
+        min_tracking_confidence=0.3,
+        canned_gesture_classifier_options=ClassifierOptions(
+            score_threshold=0.0,
+            category_allowlist=["Pointing_Up", "Thumb_Down", "Thumb_Up", "Victory"],
+        ),
     )
     return vision.GestureRecognizer.create_from_options(options)
 
