@@ -89,5 +89,5 @@ Unity 6.6 (edytor `6000.6.7f1`) zainstalowany przez Unity Hub
 Pocisk w grze posiada zmienne przyspieszenie w osiach X i Y (prostopadłych do długości tunelu), wyliczane z II zasady dynamiki Newtona jako wypadkowa siły wiatru i oporu powietrza. Użyta została również pół-niejawna metoda Eulera do iteracyjnego aktualizowania wektora prędkości i nowej pozycji pocisku w każdej klatce symulacji.
  
 # 11. Odnośnik do repozytorium
-https://github.com/mshupliakou/gesture-recognizer-game (wersja oceniana: commit `d1df805`, gałąź `master`)
+https://github.com/mshupliakou/gesture-recognizer-game
  
