@@ -1,4 +1,4 @@
-[Sprawozdanie](https://docs.google.com/document/d/1-7V3ma5Dan7shwS-XfoPM3hgOG_75nKDQnRvET-zWvo/edit?usp=sharing)
+
  
 # 1. Tytuł i numer projektu
 **Gesture Recognizer Game** (Projekt nr 6)
