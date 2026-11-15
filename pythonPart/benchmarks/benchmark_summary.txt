@@ -1,0 +1,19 @@
+Zestaw danych: benchmarks\benchmark_20261115_224548.csv
+Liczba wszystkich prób: 40
+Skuteczność MediaPipe: 33/40 (82.5%)
+Skuteczność Własnego Modelu: 25/40 (62.5%)
+Średni czas detekcji MediaPipe: 1.387 s
+Średni czas detekcji Własnego Modelu: 1.869 s
+Błędne aktywacje MediaPipe: 6
+Błędne aktywacje Własnego Modelu: 55
+Wyniki rywalizacji (który szybszy):
+  - MediaPipe: 16
+  - MediaPipe_Only: 8
+  - None_Detected: 7
+  - Custom: 5
+  - Tie: 4
+Skuteczność dla poszczególnych gestów:
+  - Thumb_Down (N=14): MP=78.6% | Custom=42.9%
+  - Pointing_Up (N=11): MP=90.9% | Custom=90.9%
+  - Victory (N=9): MP=88.9% | Custom=66.7%
+  - Thumb_Up (N=6): MP=66.7% | Custom=50.0%
