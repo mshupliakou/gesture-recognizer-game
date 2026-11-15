@@ -177,7 +177,7 @@ def add_sample(image_path: str, label: str, samples: List[Dict]):
     if not label or not label.strip():
         return None, state_summary(samples), "Wpisz etykietę.", samples
 
-    sample_variants = extract_landmarks_from_image(image_path, label, allow_augmentation=True)
+    sample_variants = extract_landmarks_from_image(image_path, label, allow_augmentation=False)
     if sample_variants is None:
         return None, state_summary(samples), "Nie wykryto dłoni na obrazie.", samples
 
@@ -185,10 +185,7 @@ def add_sample(image_path: str, label: str, samples: List[Dict]):
         samples.append(sample)
 
     first_preview = sample_variants[0]["preview"]
-    augmented_count = max(0, len(sample_variants) - 1)
     msg = f"Dodano próbkę: {label.strip()}"
-    if augmented_count:
-        msg += f" (+{augmented_count} augmentacji)"
     return first_preview, state_summary(samples), msg, samples
 
 
@@ -302,6 +299,7 @@ def save_csv_report(rows: List[Dict], path: Path):
         "accuracy",
         "fit_time_s",
         "predict_time_s",
+        "avg_predict_time_ms",
         "total_time_s",
         "support",
         "class_count",
@@ -334,7 +332,10 @@ def make_model_summary_text(rows: List[Dict]):
     lines = [
         "Porównanie modeli (ten sam split):",
         *[
-            f"- {r['feature_set']} | {r['model_name']}: accuracy={r['accuracy']:.3f}, czas={r['total_time_s']:.3f}s"
+            (
+                f"- {r['feature_set']} | {r['model_name']}: accuracy={r['accuracy']:.3f}, "
+                f"czas_treningu={r['fit_time_s']:.3f}s, avg_pred={r['avg_predict_time_ms']:.3f}ms"
+            )
             for r in rows
         ],
         "",
@@ -521,6 +522,7 @@ def compare_best_model_vs_mediapipe(
     mp_total_time = 0.0
     custom_total_time = 0.0
     used_samples = 0
+    compared_rows = []
 
     for image_path, true_label in test_records:
         bgr = cv2.imread(image_path)
@@ -555,6 +557,12 @@ def compare_best_model_vs_mediapipe(
         y_pred_mp.append(pred_mp)
         y_pred_custom.append(pred_custom)
         used_samples += 1
+        compared_rows.append({
+            "image_path": str(image_path),
+            "true_label": normalized_true,
+            "pred_custom": pred_custom,
+            "pred_mediapipe": pred_mp,
+        })
 
     if used_samples == 0:
         return "Porównanie Best vs MediaPipe pominięte: brak poprawnie wczytanych próbek testowych."
@@ -590,6 +598,12 @@ def compare_best_model_vs_mediapipe(
         writer = csv.DictWriter(handle, fieldnames=["model", "accuracy", "avg_predict_time_ms", "samples"])
         writer.writeheader()
         writer.writerows(rows)
+
+    samples_csv_path = report_dir / "best_vs_mediapipe_samples.csv"
+    with samples_csv_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["image_path", "true_label", "pred_custom", "pred_mediapipe"])
+        writer.writeheader()
+        writer.writerows(compared_rows)
 
     custom_report = classification_report(
         y_true_arr,
@@ -635,6 +649,7 @@ def compare_best_model_vs_mediapipe(
 
     return (
         "Best custom vs Google MediaPipe:\n"
+        f"- Te same obrazy testowe: {used_samples} próbek\n"
         f"- Best custom: accuracy={custom_acc:.3f}, avg_pred_ms={(custom_total_time / used_samples) * 1000.0:.3f}\n"
         f"- MediaPipe: accuracy={mp_acc:.3f}, avg_pred_ms={(mp_total_time / used_samples) * 1000.0:.3f}"
     )
@@ -764,6 +779,7 @@ def evaluate_model_configs(X: np.ndarray, y: np.ndarray, classes: List[str], fea
             "accuracy": float(acc),
             "fit_time_s": float(fit_time),
             "predict_time_s": float(predict_time),
+            "avg_predict_time_ms": float((predict_time / len(y_test)) * 1000.0) if len(y_test) else 0.0,
             "total_time_s": float(total_time),
             "support": int(len(y_test)),
             "class_count": int(len(classes)),
