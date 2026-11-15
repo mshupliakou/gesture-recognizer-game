@@ -22,7 +22,6 @@ public class BulletSpawner : MonoBehaviour
         if (handOperation == null || cooldownSystem == null) return;
 
         // Sprawdzamy, czy dłoń jest widoczna, gest należy do naszych 4 wybranych
-        // oraz czy pewność modelu (Score %) jest wystarczająca
         if (handOperation.IsHandVisible &&
             handOperation.CurrentGesture != ActiveGesture.None)
         {

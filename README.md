@@ -28,6 +28,7 @@ gesture-recognizer-game/
 │   ├── auto_capture_gestures.py         # Robienie zdjęć gestów z kamery do zbioru danych
 │   ├── gesture_label_simple_gui.py      # Gradio: etykietowanie, augmentacja, trening, benchmark, zapis modelu
 │   ├── test_gesture_classifier.py       # Test autorskiego klasyfikatora na żywo z kamery
+│   ├── plot_benchmarks.py               # Skrypt do generowania metryk z rozgrywki w trybie Stats (scientific_tracker.py bez flag --task / --trained)
 │   ├── dataset_captured/                # Zbiór danych: 156 zdjęć (pointing_up, thumb_up, thumb_down, victory)
 │   ├── models/
 │   │   └── custom_gesture_model.joblib  # Wytrenowany autorski klasyfikator (Random Forest)
@@ -59,7 +60,8 @@ python scientific_tracker.py --task --port 5055
 ```
 * `--task` – gra z gotowym modelem MediaPipe Gesture Recognizer,
 * `--trained` – gra z autorskim klasyfikatorem (`models/custom_gesture_model.joblib`),
-* `--gui` – podgląd z kamery, `--camera 1` – inny indeks kamery.
+* inne: `--gui` – podgląd z kamery, `--camera 1` – inny indeks kamery.
+
 Do uruchomienia przykładowego scenariusza **nie jest potrzebne** ponowne trenowanie modelu, ponieważ wytrenowany klasyfikator znajduje się w repozytorium.
  
 **2. Gra w Unity:**
@@ -67,7 +69,7 @@ Do uruchomienia przykładowego scenariusza **nie jest potrzebne** ponowne trenow
 2. Otwórz scenę `Assets/Scenes/MainMenu`.
 3. (Weryfikacja) W scenie `Level` zaznacz obiekt `HandManager` i sprawdź, czy **Port** w komponencie **Hand Operation** wynosi **5055**.
 4. Wróć do `MainMenu`, naciśnij **Play** w Unity i kliknij „Play” w menu gry.
-**Sterowanie:** `Pointing_Up` – niebieski pocisk, `Thumb_Down` – czerwony, `Thumb_Up` – zielony, `Victory` – żółty. Aby zniszczyć płytkę, typ pocisku musi odpowiadać emotikonie na płytce (pewność gestu > 60%). Przepuszczenie płytki odbiera 1 z 3 punktów życia.
+**Sterowanie:** `Pointing_Up` – niebieski pocisk, `Thumb_Down` – czerwony, `Thumb_Up` – zielony, `Victory` – żółty. Aby zniszczyć płytkę, typ pocisku (tworzonego gestem) musi odpowiadać emotikonie na płytce. Przepuszczenie płytki odbiera 1 punkt życia.
  
 **3. (Opcjonalnie) Trenowanie własnego klasyfikatora:**
 ```bash
@@ -81,7 +83,7 @@ Wyniki treningu trafiają do `pythonPart/results/gesture_benchmark_<data>/`, a m
 **Rozwiązywanie problemów:** brak szkieletu dłoni – sprawdź zgodność portu (`--port 5055` i ustawienie w Unity); błąd „Only one usage of each socket address” – port zajęty, zamknij poprzednią instancję Pythona; puste kwadraty zamiast emotikon – podepnij czcionkę emoji (np. `SEGUIEMJ SDF`) w polu `Emoji Font Asset` spawnerów; kamera się nie otwiera – zamknij inne programy używające kamery lub użyj `--camera 1`.
  
 # 9. Wykorzystany silnik gry
-Unity 6.6
+Unity 6.6 (edytor `6000.6.7f1`) zainstalowany przez Unity Hub
  
 # 10. Zastosowane elementy fizyki
 Pocisk w grze posiada zmienne przyspieszenie w osiach X i Y (prostopadłych do długości tunelu), wyliczane z II zasady dynamiki Newtona jako wypadkowa siły wiatru i oporu powietrza. Użyta została również pół-niejawna metoda Eulera do iteracyjnego aktualizowania wektora prędkości i nowej pozycji pocisku w każdej klatce symulacji.
