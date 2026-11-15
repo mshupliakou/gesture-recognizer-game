@@ -1,6 +1,9 @@
 """
 scientific_tracker.py — Moduł benchmarkowy A/B dla dwóch klasyfikatorów gestów.
 
+Instalacja:
+pip install mediapipe opencv-python numpy joblib scikit-learn
+
 Co robi:
 - Działa domyślnie jako nadajnik UDP (tryb headless, z opcją włączenia podglądu flagą --gui).
 - Co 5 sekund losuje zadany gest (1 z 4) i wysyła komendę spawnu ('spawn_command', 'trial_id') do Unity.
